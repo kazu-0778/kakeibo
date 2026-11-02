@@ -340,3 +340,16 @@ button.row:hover { background: var(--surface-2); }
 }
 .cat-tile .ic.add { border: 1.5px dashed var(--border); color: var(--text-3); font-size: 22px; background: none; }
 .link-btn { border: none; background: none; color: var(--text-2); font-size: 13px; padding: 4px 2px 12px; text-decoration: underline; text-underline-offset: 3px; }
+/* カテゴリのドラッグ並べ替え */
+.drag-handle {
+  width: 44px; height: 44px; flex: none; display: grid; place-items: center; color: var(--text-3);
+  touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; border-radius: 10px;
+}
+.drag-handle:hover { background: var(--surface-2); }
+.drag-handle svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.row.dragging {
+  position: relative; z-index: 20; background: var(--surface); border-radius: 12px;
+  box-shadow: 0 10px 28px rgb(0 0 0 / .22); opacity: 1;
+}
+.row.dragging .drag-handle { cursor: grabbing; color: var(--text); }
+body.is-dragging { user-select: none; -webkit-user-select: none; cursor: grabbing; }

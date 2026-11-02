@@ -621,22 +621,20 @@ async function renderSettings() {
         <span class="sub">${esc(sub)}</span></span>
       <span class="amt ${cat.kind === 'income' ? 'income' : ''}">${r.amount_type === 'variable' ? '約' : ''}${yen(r.amount)}</span></button>`;
   };
-  const catRow = (c) => `<div class="row ${c.archived ? 'archived' : ''}">
+  const catRow = (c) => `<div class="row ${c.archived ? 'archived' : ''}" data-id="${c.id}">
       <button type="button" class="row-link" data-cat-edit="${c.id}">
         <span class="ic ${toneOf(c)}">${esc(c.icon)}</span>
         <span class="body"><span class="title">${esc(c.name)}${c.archived ? '<span class="badge gray">非表示</span>' : ''}</span></span>
       </button>
-      <span class="actions">
-        <button type="button" class="icon-btn" data-move="-1" data-id="${c.id}" aria-label="上へ">▲</button>
-        <button type="button" class="icon-btn" data-move="1" data-id="${c.id}" aria-label="下へ">▼</button>
-      </span></div>`;
+      <span class="drag-handle" data-drag aria-label="ドラッグで並べ替え" title="ドラッグで並べ替え">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h16M4 12h16M4 16h16"/></svg></span></div>`;
 
   const catGroups = kind === 'income'
-    ? `<div class="card list">${cats.map(catRow).join('') || '<p class="empty">カテゴリがありません</p>'}</div>`
+    ? `<div class="card list" data-sort-list>${cats.map(catRow).join('') || '<p class="empty">カテゴリがありません</p>'}</div>`
     : MAJORS.map((m) => {
       const list = cats.filter((c) => c.major === m.key);
       return `<div class="day-head"><span><span class="dot" style="background:var(--${m.key})"></span> ${m.label}</span></div>
-        <div class="card list">${list.map(catRow).join('') || '<p class="empty">なし</p>'}</div>`;
+        <div class="card list" data-sort-list>${list.map(catRow).join('') || '<p class="empty">なし</p>'}</div>`;
     }).join('');
 
   $('#settings').innerHTML = `
@@ -649,7 +647,7 @@ async function renderSettings() {
       <button type="button" data-skind="expense" aria-pressed="${kind === 'expense'}">支出</button>
       <button type="button" data-skind="income" aria-pressed="${kind === 'income'}">収入</button>
     </div>
-    <p class="muted" style="font-size:12px;margin:8px 4px 0">行をタップすると、名前・アイコン・大分類の変更や削除ができます。▲▼で並べ替えます。</p>
+    <p class="muted" style="font-size:12px;margin:8px 4px 0">行をタップすると、名前・アイコン・大分類の変更や削除ができます。右端の ≡ をドラッグすると並べ替えられます。</p>
     ${catGroups}
 
     <div class="settings-head"><h2>アカウント</h2></div>
@@ -662,6 +660,7 @@ async function renderSettings() {
     </div>`;
 
   const root = $('#settings');
+  if (!root.dataset.dragReady) { enableCategoryDrag(root); root.dataset.dragReady = '1'; }
   const recMap = new Map(recurring.map((r) => [r.id, r]));
   root.onclick = async (e) => {
     const t = e.target;
@@ -674,8 +673,6 @@ async function renderSettings() {
     if (ce) return openCategoryEditor(state.catMap.get(ce.dataset.catEdit));
     const sk = t.closest('[data-skind]');
     if (sk) { state.settingsKind = sk.dataset.skind; return renderSettings(); }
-    const mv = t.closest('[data-move]');
-    if (mv) return guard(() => moveCategory(mv.dataset.id, Number(mv.dataset.move)));
     if (t.closest('[data-save-hh]')) {
       const name = $('[name="hhname"]', root).value.trim();
       if (!name) return;
@@ -689,18 +686,94 @@ async function renderSettings() {
   };
 }
 
-async function moveCategory(id, dir) {
-  const cat = state.catMap.get(id);
-  const group = sortedCats(cat.kind, { includeArchived: true }).filter((c) => c.major === cat.major);
-  const i = group.findIndex((c) => c.id === id);
-  const j = i + dir;
-  if (j < 0 || j >= group.length) return;
-  [group[i], group[j]] = [group[j], group[i]];
-  const base = cat.kind === 'income' ? 300 : { consumption: 0, waste: 100, investment: 200 }[cat.major];
-  const changes = group.map((c, k) => ({ c, order: base + (k + 1) * 5 })).filter(({ c, order }) => c.sort_order !== order);
+// 並び順を保存（同じグループ内を 5 刻みで振り直す）
+async function saveCategoryOrder(ids) {
+  const first = state.catMap.get(ids[0]);
+  const base = first.kind === 'income' ? 300 : { consumption: 0, waste: 100, investment: 200 }[first.major];
+  const changes = ids.map((id, k) => ({ c: state.catMap.get(id), order: base + (k + 1) * 5 }))
+    .filter(({ c, order }) => c.sort_order !== order);
+  if (!changes.length) return true;
   await Promise.all(changes.map(({ c, order }) => db.saveCategory({ id: c.id, sort_order: order })));
   changes.forEach(({ c, order }) => { c.sort_order = order; });
-  await renderSettings();
+  inputMounted = false; // 入力画面の並びも更新
+  toast('並び順を保存しました');
+  return true;
+}
+
+// ≡ をつかんで上下にドラッグ（指でもマウスでも動く）
+function enableCategoryDrag(root) {
+  root.addEventListener('pointerdown', (e) => {
+    const handle = e.target.closest('[data-drag]');
+    if (!handle || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    const row = handle.closest('.row');
+    const list = row.closest('[data-sort-list]');
+    if (!row || !list) return;
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+
+    const before = $$('.row[data-id]', list).map((r) => r.dataset.id);
+    let startY = e.clientY + window.scrollY;
+    let lastClientY = e.clientY;
+    const startClientY = e.clientY;
+    let raf = 0;
+    row.classList.add('dragging');
+    document.body.classList.add('is-dragging');
+    navigator.vibrate?.(10);
+
+    const update = () => {
+      const pageY = lastClientY + window.scrollY;
+      // 上の行の中央を越えたら入れ替え
+      let prev = row.previousElementSibling;
+      while (prev && prev.matches('.row[data-id]')) {
+        const r = prev.getBoundingClientRect();
+        if (pageY >= r.top + window.scrollY + r.height / 2) break;
+        list.insertBefore(row, prev);
+        startY -= r.height;
+        prev = row.previousElementSibling;
+      }
+      // 下の行の中央を越えたら入れ替え
+      let next = row.nextElementSibling;
+      while (next && next.matches('.row[data-id]')) {
+        const r = next.getBoundingClientRect();
+        if (pageY <= r.top + window.scrollY + r.height / 2) break;
+        list.insertBefore(row, next.nextElementSibling);
+        startY += r.height;
+        next = row.nextElementSibling;
+      }
+      row.style.transform = `translateY(${pageY - startY}px)`;
+    };
+    // 画面の端に来たら自動スクロール
+    const autoScroll = () => {
+      const navTop = window.innerWidth >= 900 ? window.innerHeight : $('.nav').getBoundingClientRect().top;
+      const edge = 70;
+      const moved = lastClientY - startClientY; // 指を動かした方向にだけスクロール
+      let dy = 0;
+      if (moved < -10 && lastClientY < edge) dy = -Math.ceil((edge - lastClientY) / 6);
+      else if (moved > 10 && lastClientY > navTop - edge) dy = Math.ceil((lastClientY - (navTop - edge)) / 6);
+      if (dy) { window.scrollBy(0, dy); update(); }
+      raf = requestAnimationFrame(autoScroll);
+    };
+    raf = requestAnimationFrame(autoScroll);
+
+    const onMove = (ev) => { lastClientY = ev.clientY; update(); };
+    const onEnd = async () => {
+      cancelAnimationFrame(raf);
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onEnd);
+      handle.removeEventListener('pointercancel', onEnd);
+      row.classList.remove('dragging');
+      row.style.transform = '';
+      document.body.classList.remove('is-dragging');
+      const after = $$('.row[data-id]', list).map((r) => r.dataset.id);
+      if (after.join() !== before.join()) {
+        const ok = await guard(() => saveCategoryOrder(after));
+        if (ok === undefined) renderSettings(); // 失敗時は元の並びに戻す
+      }
+    };
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onEnd);
+    handle.addEventListener('pointercancel', onEnd);
+  });
 }
 
 function openCategoryEditor(cat, defaultKind = 'expense', { major, onSaved } = {}) {
