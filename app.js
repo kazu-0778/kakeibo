@@ -867,8 +867,7 @@ function openCategoryEditor(cat, defaultKind = 'expense', { major, onSaved } = {
 
 function openRecurringEditor(rec) {
   const now = firstOfMonth(new Date());
-  // 新規は「1日」が初期値。今月の1日は過ぎているので、今日が1日でなければ来月から
-  const startBase = rec ? firstOfMonth(parseYmd(rec.next_date)) : (new Date().getDate() === 1 ? now : addMonths(now, 1));
+  const startBase = rec ? firstOfMonth(parseYmd(rec.next_date)) : now;
   const s = {
     kind: rec ? catOf(rec.category_id).kind : 'expense',
     amountType: rec?.amount_type ?? 'fixed',

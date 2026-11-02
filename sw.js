@@ -1,6 +1,6 @@
 // オフラインでも画面を開けるようにするサービスワーカー
 // 更新時は VERSION を変更してください
-const VERSION = 'kakeibo-v5';
+const VERSION = 'kakeibo-v6';
 const ASSETS = [
   './', 'index.html', 'style.css', 'app.js', 'db.js', 'config.js',
   'supabase.js', 'chart.umd.min.js', 'manifest.webmanifest',
@@ -20,7 +20,8 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   e.respondWith(
-    fetch(e.request)
+    // ブラウザのキャッシュを使わず、毎回サーバーに更新を確認する
+    fetch(url.href, { cache: 'no-cache', credentials: 'same-origin' })
       .then((res) => {
         const copy = res.clone();
         caches.open(VERSION).then((c) => c.put(e.request, copy));
