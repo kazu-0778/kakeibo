@@ -867,7 +867,8 @@ function openCategoryEditor(cat, defaultKind = 'expense', { major, onSaved } = {
 
 function openRecurringEditor(rec) {
   const now = firstOfMonth(new Date());
-  const startBase = rec ? firstOfMonth(parseYmd(rec.next_date)) : now;
+  // 新規は「1日」が初期値。今月の1日は過ぎているので、今日が1日でなければ来月から
+  const startBase = rec ? firstOfMonth(parseYmd(rec.next_date)) : (new Date().getDate() === 1 ? now : addMonths(now, 1));
   const s = {
     kind: rec ? catOf(rec.category_id).kind : 'expense',
     amountType: rec?.amount_type ?? 'fixed',
@@ -892,7 +893,7 @@ function openRecurringEditor(rec) {
         <label class="field"><span>頻度</span><select name="interval">
           ${INTERVALS.map(([v, l]) => `<option value="${v}" ${(rec?.interval_months ?? 1) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
         <label class="field"><span>日付</span><select name="day">
-          ${Array.from({ length: 31 }, (_, i) => i + 1).map((d) => `<option value="${d}" ${(rec?.day_of_month ?? 25) === d ? 'selected' : ''}>${dayLabel(d)}</option>`).join('')}</select></label>
+          ${Array.from({ length: 31 }, (_, i) => i + 1).map((d) => `<option value="${d}" ${(rec?.day_of_month ?? 1) === d ? 'selected' : ''}>${dayLabel(d)}</option>`).join('')}</select></label>
       </div>
       <label class="field"><span>${rec ? '次回の月' : '最初の月'}</span><select name="start">
         ${monthOpts.map((d) => `<option value="${ymd(d)}" ${d.getTime() === startBase.getTime() ? 'selected' : ''}>${fmtMonth(d)}</option>`).join('')}</select></label>
