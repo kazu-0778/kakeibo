@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>家計簿</title>
+  <meta name="theme-color" content="#f7f6f3" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#161615" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="家計簿">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/style.css">
+  <script src="vendor/supabase.js"></script>
+  <script src="vendor/chart.umd.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <!-- 起動中 -->
+  <div id="splash" class="splash">読み込み中…</div>
+
+  <!-- ログイン -->
+  <div id="login" class="login" hidden>
+    <form id="login-form" class="login-card">
+      <div class="login-logo">💴</div>
+      <h1>家計簿</h1>
+      <label class="field">
+        <span>メールアドレス</span>
+        <input type="email" name="email" autocomplete="username" required>
+      </label>
+      <label class="field">
+        <span>パスワード</span>
+        <input type="password" name="password" autocomplete="current-password" required>
+      </label>
+      <p id="login-error" class="error" hidden></p>
+      <button type="submit" class="btn primary block">ログイン</button>
+    </form>
+  </div>
+
+  <!-- 本体 -->
+  <div id="app" class="app" hidden>
+    <nav class="nav" aria-label="メインメニュー">
+      <div class="nav-title">家計簿</div>
+      <button class="nav-item" data-view="input" aria-current="page">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>入力</span>
+      </button>
+      <button class="nav-item" data-view="history">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg><span>履歴</span>
+      </button>
+      <button class="nav-item" data-view="charts">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V11M12 20V4M19 20v-6"/></svg><span>グラフ</span>
+      </button>
+      <button class="nav-item" data-view="settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg><span>設定</span>
+      </button>
+    </nav>
+
+    <main class="main">
+      <!-- 入力 -->
+      <section id="view-input" class="view">
+        <button id="pending-banner" class="pending-banner" hidden></button>
+        <div id="input-form" class="card"></div>
+        <h2 class="section-title">最近の入力</h2>
+        <div id="recent-list" class="card list"></div>
+      </section>
+
+      <!-- 履歴 -->
+      <section id="view-history" class="view" hidden>
+        <div class="month-nav" data-month-nav></div>
+        <div id="history-summary" class="summary"></div>
+        <div id="history-list"></div>
+      </section>
+
+      <!-- グラフ -->
+      <section id="view-charts" class="view" hidden>
+        <div class="toolbar">
+          <div class="month-nav" data-month-nav></div>
+          <div class="segmented" id="chart-period" role="tablist">
+            <button data-period="month" aria-pressed="true">月</button>
+            <button data-period="year" aria-pressed="false">年</button>
+          </div>
+        </div>
+        <div class="chart-grid">
+          <div class="card chart-card">
+            <h3>大分類（支出）</h3>
+            <div class="donut-wrap">
+              <canvas id="chart-major" aria-label="大分類ごとの支出割合"></canvas>
+              <div class="donut-center" id="major-center"></div>
+            </div>
+            <div id="major-legend" class="legend-list"></div>
+          </div>
+          <div class="card chart-card">
+            <div class="card-head">
+              <h3>カテゴリ別（支出）</h3>
+              <div class="chips" id="cat-filter">
+                <button data-major="" aria-pressed="true">すべて</button>
+                <button data-major="consumption" aria-pressed="false">消費</button>
+                <button data-major="waste" aria-pressed="false">浪費</button>
+                <button data-major="investment" aria-pressed="false">投資</button>
+              </div>
+            </div>
+            <div id="cat-bars" class="bars"></div>
+          </div>
+          <div class="card chart-card">
+            <h3>カテゴリ別（収入）</h3>
+            <div id="income-bars" class="bars"></div>
+          </div>
+          <div class="card chart-card wide">
+            <h3>月ごとの推移（直近12か月）</h3>
+            <div class="trend-wrap"><canvas id="chart-trend" aria-label="月ごとの支出推移"></canvas></div>
+            <div class="table-scroll"><table id="trend-table" class="trend-table"></table></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 設定 -->
+      <section id="view-settings" class="view" hidden>
+        <div id="settings"></div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="modal" class="modal"><div id="modal-body"></div></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
