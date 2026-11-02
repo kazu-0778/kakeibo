@@ -363,7 +363,7 @@ async function renderInput() {
   if (!inputMounted) {
     mountTxForm($('#input-form'), {
       onSubmit: async (v) => {
-        await db.saveTransaction(v);
+        await db.saveTransaction({ ...v, household_id: state.hh });
         toast(`${catOf(v.category_id).icon} ${yen(v.amount)} を記録しました`);
         await loadRecent();
         return true;
