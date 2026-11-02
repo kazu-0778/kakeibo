@@ -1,6 +1,6 @@
 // オフラインでも画面を開けるようにするサービスワーカー
 // 更新時は VERSION を変更してください
-const VERSION = 'kakeibo-v2';
+const VERSION = 'kakeibo-v3';
 const ASSETS = [
   './', 'index.html', 'style.css', 'app.js', 'db.js', 'config.js',
   'supabase.js', 'chart.umd.min.js', 'manifest.webmanifest',

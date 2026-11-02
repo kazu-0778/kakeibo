@@ -338,3 +338,5 @@ button.row:hover { background: var(--surface-2); }
   .toast { top: calc(env(safe-area-inset-top, 0px) + 12px); bottom: auto; transform: translate(-50%, -20px); }
   .toast.show { transform: translate(-50%, 0); }
 }
+.cat-tile .ic.add { border: 1.5px dashed var(--border); color: var(--text-3); font-size: 22px; background: none; }
+.link-btn { border: none; background: none; color: var(--text-2); font-size: 13px; padding: 4px 2px 12px; text-decoration: underline; text-underline-offset: 3px; }

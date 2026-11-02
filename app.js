@@ -125,7 +125,7 @@ function catTile(cat, selected) {
     <span class="ic ${toneOf(cat)}">${esc(cat.icon)}</span><span class="nm">${esc(cat.name)}</span></button>`;
 }
 
-function mountTxForm(container, { tx = null, onSubmit, onDelete }) {
+function mountTxForm(container, { tx = null, onSubmit, onDelete, allowCatEdit = false }) {
   const s = {
     kind: tx ? catOf(tx.category_id).kind : 'expense',
     categoryId: tx?.category_id ?? null,
@@ -185,25 +185,43 @@ function mountTxForm(container, { tx = null, onSubmit, onDelete }) {
       if (cur && cur.kind === s.kind) cats.push(cur);
     }
     if (s.categoryId && !cats.some((c) => c.id === s.categoryId)) s.categoryId = null;
-    if (!cats.length) {
+    // 入力画面では各グループの最後に「＋追加」タイルを出す
+    const addTile = (major) => (allowCatEdit
+      ? `<button type="button" class="cat-tile" data-add-cat-inline="${major}"><span class="ic add">＋</span><span class="nm">追加</span></button>`
+      : '');
+    const editLink = allowCatEdit
+      ? '<button type="button" class="link-btn" data-goto-cats>カテゴリの編集・削除・並べ替え ›</button>'
+      : '';
+    if (!cats.length && !allowCatEdit) {
       box.innerHTML = '<p class="empty">カテゴリがありません。設定から追加してください。</p>';
       return;
     }
     if (s.kind === 'income') {
-      box.innerHTML = `<div class="cat-grid">${cats.map((c) => catTile(c, c.id === s.categoryId)).join('')}</div>`;
+      box.innerHTML = `<div class="cat-grid">${cats.map((c) => catTile(c, c.id === s.categoryId)).join('')}${addTile('')}</div>${editLink}`;
     } else {
       box.innerHTML = MAJORS.map((m) => {
         const list = cats.filter((c) => c.major === m.key);
-        if (!list.length) return '';
+        if (!list.length && !allowCatEdit) return '';
         return `<div class="cat-group-title"><span class="dot" style="background:var(--${m.key})"></span>${m.label}</div>
-          <div class="cat-grid">${list.map((c) => catTile(c, c.id === s.categoryId)).join('')}</div>`;
-      }).join('');
+          <div class="cat-grid">${list.map((c) => catTile(c, c.id === s.categoryId)).join('')}${addTile(m.key)}</div>`;
+      }).join('') + editLink;
     }
   };
 
   form.addEventListener('click', (e) => {
     const k = e.target.closest('[data-kind]');
     if (k) { s.kind = k.dataset.kind; renderKind(); renderCats(); return; }
+    const add = e.target.closest('[data-add-cat-inline]');
+    if (add) {
+      openCategoryEditor(null, s.kind, {
+        major: add.dataset.addCatInline || undefined,
+        onSaved: (saved) => { s.categoryId = saved?.id ?? null; renderCats(); },
+      });
+      return;
+    }
+    if (e.target.closest('[data-goto-cats]')) {
+      state.settingsKind = s.kind; state.view = 'settings'; window.scrollTo(0, 0); renderView(); return;
+    }
     const c = e.target.closest('[data-cat]');
     if (c) {
       s.categoryId = c.dataset.cat;
@@ -350,6 +368,7 @@ async function renderInput() {
         await loadRecent();
         return true;
       },
+      allowCatEdit: true,
     });
     inputMounted = true;
   }
@@ -630,6 +649,7 @@ async function renderSettings() {
       <button type="button" data-skind="expense" aria-pressed="${kind === 'expense'}">支出</button>
       <button type="button" data-skind="income" aria-pressed="${kind === 'income'}">収入</button>
     </div>
+    <p class="muted" style="font-size:12px;margin:8px 4px 0">行をタップすると、名前・アイコン・大分類の変更や削除ができます。▲▼で並べ替えます。</p>
     ${catGroups}
 
     <div class="settings-head"><h2>アカウント</h2></div>
@@ -683,10 +703,10 @@ async function moveCategory(id, dir) {
   await renderSettings();
 }
 
-function openCategoryEditor(cat, defaultKind = 'expense') {
+function openCategoryEditor(cat, defaultKind = 'expense', { major, onSaved } = {}) {
   const s = {
     kind: cat?.kind ?? defaultKind,
-    major: cat?.major ?? 'consumption',
+    major: cat?.major ?? major ?? 'consumption',
     icon: cat?.icon ?? (defaultKind === 'income' ? '💴' : '🛒'),
   };
   const body = openModal(cat ? 'カテゴリの編集' : 'カテゴリの追加', `
@@ -762,9 +782,11 @@ function openCategoryEditor(cat, defaultKind = 'expense') {
         : (s.kind === 'income' ? 300 : { consumption: 0, waste: 100, investment: 200 }[s.major]) + 5;
     }
     await guard(async () => {
-      await db.saveCategory(row);
+      const saved = await db.saveCategory(row);
       setCategories(await db.listCategories(state.hh));
-      closeModal(); toast('保存しました'); inputMounted = false; renderView();
+      closeModal();
+      if (onSaved) { toast(`${row.icon} ${row.name} を追加しました`); onSaved(saved); return; }
+      toast('保存しました'); inputMounted = false; renderView();
     });
   });
   render();
