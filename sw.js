@@ -1,10 +1,10 @@
 // オフラインでも画面を開けるようにするサービスワーカー
 // 更新時は VERSION を変更してください
-const VERSION = 'kakeibo-v1';
+const VERSION = 'kakeibo-v2';
 const ASSETS = [
-  './', 'index.html', 'css/style.css', 'js/app.js', 'js/db.js', 'js/config.js',
-  'vendor/supabase.js', 'vendor/chart.umd.min.js', 'manifest.webmanifest',
-  'icons/icon-192.png', 'icons/apple-touch-icon.png',
+  './', 'index.html', 'style.css', 'app.js', 'db.js', 'config.js',
+  'supabase.js', 'chart.umd.min.js', 'manifest.webmanifest',
+  'icon-192.png', 'apple-touch-icon.png',
 ];
 
 self.addEventListener('install', (e) => {
