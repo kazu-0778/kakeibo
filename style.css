@@ -379,3 +379,25 @@ body.is-dragging { user-select: none; -webkit-user-select: none; cursor: grabbin
 }
 .sheet-sub { font-size: 14px; margin: 18px 0 10px; color: var(--text-2); }
 .day-list { border: 1px solid var(--border); border-radius: 12px; }
+.day-total { border-top: 2px solid var(--border); padding: 10px 16px; background: var(--surface-2); border-radius: 0 0 11px 11px; }
+.day-total .tl { display: flex; justify-content: space-between; align-items: baseline; font-size: 14px; font-weight: 600; color: var(--text-2); }
+.day-total .tl + .tl { margin-top: 2px; }
+.day-total b { font-size: 17px; color: var(--text); font-variant-numeric: tabular-nums; }
+.day-total b.inc { color: var(--income); }
+.day-total .note { font-size: 11px; color: var(--text-3); margin-top: 4px; }
+/* 支出＝赤、収入＝青 */
+:root { --minus: #c93a3a; --plus: #1f6fd1; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --minus: #ef6b6b; --plus: #5aa2ff; } }
+.minus { color: var(--minus) !important; }
+.plus { color: var(--plus) !important; }
+.row .amt { color: var(--minus); }
+.row .amt.income { color: var(--plus); }
+.segmented.kind button[data-kind="income"][aria-pressed="true"] { color: var(--plus); }
+.cal-day .e { color: var(--minus); font-weight: 600; }
+.cal-day .i { color: var(--plus); font-weight: 600; }
+.cal-day .e, .cal-day .i { font-size: 10px; letter-spacing: -.04em; }
+.cal-day .l { font-size: 9px; }
+.cal-day .xl { font-size: 7.5px; }
+@media (min-width: 900px) { .cal-day .e, .cal-day .i, .cal-day .l, .cal-day .xl { font-size: 12px; } }
+.day-total b { color: var(--minus); }
+.day-total b.inc { color: var(--plus); }

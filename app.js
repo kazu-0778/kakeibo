@@ -414,8 +414,8 @@ async function renderHistory() {
   const inc = confirmed.filter(isIncome).reduce((a, t) => a + t.amount, 0);
   const exp = confirmed.filter((t) => !isIncome(t)).reduce((a, t) => a + t.amount, 0);
   $('#history-summary').innerHTML = `
-    <div class="card"><div class="k">収入</div><div class="v" style="color:var(--income)">${yen(inc)}</div></div>
-    <div class="card"><div class="k">支出</div><div class="v">${yen(exp)}</div></div>
+    <div class="card"><div class="k">収入</div><div class="v plus">${yen(inc)}</div></div>
+    <div class="card"><div class="k">支出</div><div class="v minus">${yen(exp)}</div></div>
     <div class="card"><div class="k">収支</div><div class="v ${inc - exp < 0 ? 'neg' : ''}">${inc - exp < 0 ? '-' : ''}${yen(Math.abs(inc - exp))}</div></div>`;
 
   renderCalendar(list);
@@ -426,7 +426,7 @@ async function renderHistory() {
   for (const t of list) { if (!byDate.has(t.date)) byDate.set(t.date, []); byDate.get(t.date).push(t); }
   box.innerHTML = [...byDate].map(([date, items]) => {
     const dayExp = items.filter((t) => t.status === 'confirmed' && !isIncome(t)).reduce((a, t) => a + t.amount, 0);
-    return `<div class="day-head"><span>${esc(fmtDate(date))}</span><span>${dayExp ? '支出 ' + yen(dayExp) : ''}</span></div>
+    return `<div class="day-head"><span>${esc(fmtDate(date))}</span><span>${dayExp ? `支出 <span class="minus">${yen(dayExp)}</span>` : ''}</span></div>
       <div class="card list">${items.map((t) => txRow(t)).join('')}</div>`;
   }).join('');
   box.insertAdjacentHTML('afterbegin', '<h2 class="section-title">この月の明細</h2>');
@@ -437,6 +437,9 @@ async function renderHistory() {
 const compactYen = (n) => (n >= 10000
   ? `${(n / 10000).toLocaleString('ja-JP', { maximumFractionDigits: n >= 100000 ? 0 : 1 })}万`
   : n.toLocaleString('ja-JP'));
+
+// 桁数が多いときは文字を小さくしてマスに収める
+const calLen = (n) => (n >= 1000000 ? 'xl' : n >= 100000 ? 'l' : '');
 
 function renderCalendar(list) {
   let cal = $('#history-calendar');
@@ -471,8 +474,8 @@ function renderCalendar(list) {
     const label = `${m + 1}月${d}日` + (a?.exp ? ` 支出${a.exp}円` : '') + (a?.inc ? ` 収入${a.inc}円` : '');
     cells.push(`<button type="button" class="cal-day ${dow === 0 ? 'sun' : dow === 6 ? 'sat' : ''} ${date === today ? 'today' : ''}" data-day="${date}" aria-label="${label}">
       <span class="d">${d}</span>
-      ${a?.exp ? `<span class="e">${compactYen(a.exp)}</span>` : ''}
-      ${a?.inc ? `<span class="i">+${compactYen(a.inc)}</span>` : ''}
+      ${a?.exp ? `<span class="e ${calLen(a.exp)}">${a.exp.toLocaleString('ja-JP')}</span>` : ''}
+      ${a?.inc ? `<span class="i ${calLen(a.inc)}">${a.inc.toLocaleString('ja-JP')}</span>` : ''}
       ${a?.pending ? '<span class="p" title="確認待ちあり"></span>' : ''}
     </button>`);
   }
@@ -495,8 +498,17 @@ function openDaySheet(date) {
     const box = $('[data-day-list]', body);
     if (!box) return;
     const items = await db.listTransactions(state.hh, date, ymd(next));
+    const ok = items.filter((t) => t.status === 'confirmed');
+    const exp = ok.filter((t) => !isIncome(t)).reduce((a, t) => a + t.amount, 0);
+    const inc = ok.filter(isIncome).reduce((a, t) => a + t.amount, 0);
+    const pend = items.length - ok.length;
+    const total = `<div class="day-total">
+        <div class="tl"><span>支出合計</span><b>${yen(exp)}</b></div>
+        ${inc ? `<div class="tl"><span>収入合計</span><b class="inc">+${yen(inc)}</b></div>` : ''}
+        ${pend ? `<div class="note">※ 確認待ち${pend}件は合計に含みません</div>` : ''}
+      </div>`;
     box.innerHTML = items.length
-      ? `<div class="list day-list">${items.map((t) => txRow(t)).join('')}</div>`
+      ? `<div class="list day-list">${items.map((t) => txRow(t)).join('')}${total}</div>`
       : '<p class="empty" style="padding:12px">この日の記録はまだありません</p>';
     bindTxRows(box, items);
   };
