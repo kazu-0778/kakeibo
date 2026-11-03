@@ -108,7 +108,8 @@ function openModal(title, html) {
       <button type="button" class="icon-btn" data-close aria-label="閉じる">✕</button></div>
     <div class="modal-content">${html}</div>`;
   $('[data-close]', modalBody).onclick = closeModal;
-  modal.showModal();
+  if (!modal.open) modal.showModal();
+  modalBody.scrollTop = 0;
   return modalBody;
 }
 function closeModal() {
@@ -125,11 +126,11 @@ function catTile(cat, selected) {
     <span class="ic ${toneOf(cat)}">${esc(cat.icon)}</span><span class="nm">${esc(cat.name)}</span></button>`;
 }
 
-function mountTxForm(container, { tx = null, onSubmit, onDelete, allowCatEdit = false }) {
+function mountTxForm(container, { tx = null, onSubmit, onDelete, allowCatEdit = false, defaultDate = null }) {
   const s = {
     kind: tx ? catOf(tx.category_id).kind : 'expense',
     categoryId: tx?.category_id ?? null,
-    date: tx?.date ?? todayStr(),
+    date: tx?.date ?? defaultDate ?? todayStr(),
   };
   const isPending = tx?.status === 'pending';
   container.innerHTML = `
@@ -249,7 +250,7 @@ function mountTxForm(container, { tx = null, onSubmit, onDelete, allowCatEdit = 
     btn.disabled = false;
     if (ok !== undefined && !tx) {
       // 次の入力に備えてリセット（支出/収入の選択は維持）
-      amount.value = ''; form.memo.value = ''; s.categoryId = null; s.date = todayStr();
+      amount.value = ''; form.memo.value = ''; s.categoryId = null; s.date = defaultDate ?? todayStr();
       renderDate(); renderCats();
     }
   });
@@ -417,6 +418,8 @@ async function renderHistory() {
     <div class="card"><div class="k">支出</div><div class="v">${yen(exp)}</div></div>
     <div class="card"><div class="k">収支</div><div class="v ${inc - exp < 0 ? 'neg' : ''}">${inc - exp < 0 ? '-' : ''}${yen(Math.abs(inc - exp))}</div></div>`;
 
+  renderCalendar(list);
+
   const box = $('#history-list');
   if (!list.length) { box.innerHTML = '<p class="empty">この月の記録はありません</p>'; return; }
   const byDate = new Map();
@@ -426,7 +429,88 @@ async function renderHistory() {
     return `<div class="day-head"><span>${esc(fmtDate(date))}</span><span>${dayExp ? '支出 ' + yen(dayExp) : ''}</span></div>
       <div class="card list">${items.map((t) => txRow(t)).join('')}</div>`;
   }).join('');
+  box.insertAdjacentHTML('afterbegin', '<h2 class="section-title">この月の明細</h2>');
   bindTxRows(box, list);
+}
+
+// ---- カレンダー ----
+const compactYen = (n) => (n >= 10000
+  ? `${(n / 10000).toLocaleString('ja-JP', { maximumFractionDigits: n >= 100000 ? 0 : 1 })}万`
+  : n.toLocaleString('ja-JP'));
+
+function renderCalendar(list) {
+  let cal = $('#history-calendar');
+  if (!cal) {
+    cal = document.createElement('div');
+    cal.id = 'history-calendar';
+    $('#history-list').before(cal);
+    cal.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-day]');
+      if (b) openDaySheet(b.dataset.day);
+    });
+  }
+  const y = state.month.getFullYear();
+  const m = state.month.getMonth();
+  const offset = new Date(y, m, 1).getDay();
+  const days = new Date(y, m + 1, 0).getDate();
+  const agg = new Map();
+  for (const t of list) {
+    const a = agg.get(t.date) ?? { exp: 0, inc: 0, pending: false };
+    if (t.status === 'pending') a.pending = true;
+    else if (isIncome(t)) a.inc += t.amount;
+    else a.exp += t.amount;
+    agg.set(t.date, a);
+  }
+  const today = todayStr();
+  const cells = [];
+  for (let i = 0; i < offset; i++) cells.push('<span class="cal-blank"></span>');
+  for (let d = 1; d <= days; d++) {
+    const date = `${y}-${pad(m + 1)}-${pad(d)}`;
+    const dow = (offset + d - 1) % 7;
+    const a = agg.get(date);
+    const label = `${m + 1}月${d}日` + (a?.exp ? ` 支出${a.exp}円` : '') + (a?.inc ? ` 収入${a.inc}円` : '');
+    cells.push(`<button type="button" class="cal-day ${dow === 0 ? 'sun' : dow === 6 ? 'sat' : ''} ${date === today ? 'today' : ''}" data-day="${date}" aria-label="${label}">
+      <span class="d">${d}</span>
+      ${a?.exp ? `<span class="e">${compactYen(a.exp)}</span>` : ''}
+      ${a?.inc ? `<span class="i">+${compactYen(a.inc)}</span>` : ''}
+      ${a?.pending ? '<span class="p" title="確認待ちあり"></span>' : ''}
+    </button>`);
+  }
+  cal.className = 'card calendar';
+  cal.innerHTML = `
+    <div class="cal-grid">${[...WD].map((w, i) => `<span class="cal-wd ${i === 0 ? 'sun' : i === 6 ? 'sat' : ''}">${w}</span>`).join('')}${cells.join('')}</div>
+    <p class="cal-hint">日付をタップすると、その日の記録の確認と入力ができます</p>`;
+}
+
+// 日付をタップしたときのシート（その日の記録＋入力フォーム）
+function openDaySheet(date) {
+  const body = openModal(fmtDateLong(date), `
+    <div data-day-list></div>
+    <h3 class="sheet-sub">この日に記録する</h3>
+    <div data-form></div>`);
+  let changed = false;
+  modal.addEventListener('close', () => { if (changed) renderView(); }, { once: true });
+  const next = parseYmd(date); next.setDate(next.getDate() + 1);
+  const renderList = async () => {
+    const box = $('[data-day-list]', body);
+    if (!box) return;
+    const items = await db.listTransactions(state.hh, date, ymd(next));
+    box.innerHTML = items.length
+      ? `<div class="list day-list">${items.map((t) => txRow(t)).join('')}</div>`
+      : '<p class="empty" style="padding:12px">この日の記録はまだありません</p>';
+    bindTxRows(box, items);
+  };
+  mountTxForm($('[data-form]', body), {
+    defaultDate: date,
+    onSubmit: async (v) => {
+      await db.saveTransaction({ ...v, household_id: state.hh });
+      toast(`${catOf(v.category_id).icon} ${yen(v.amount)} を記録しました`);
+      changed = true;
+      await renderList();
+      return true;
+    },
+  });
+  guard(renderList);
 }
 
 // =====================================================================
