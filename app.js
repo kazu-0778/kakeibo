@@ -141,6 +141,7 @@ function mountTxForm(container, { tx = null, onSubmit, onDelete, allowCatEdit = 
       </div>
       <label class="amount-row"><span class="yen">¥</span>
         <input name="amount" inputmode="numeric" autocomplete="off" placeholder="0" aria-label="金額"></label>
+      <input class="memo-input" name="memo" placeholder="メモ（任意）" maxlength="100" autocomplete="off">
       <div class="date-row">
         <label class="date-btn"><span class="cal" aria-hidden="true">📅</span><span data-date-label></span>
           <input type="date" name="date" aria-label="日付をカレンダーから選ぶ"></label>
@@ -150,7 +151,6 @@ function mountTxForm(container, { tx = null, onSubmit, onDelete, allowCatEdit = 
         </div>
       </div>
       <div data-cats></div>
-      <input class="memo-input" name="memo" placeholder="メモ（任意）" maxlength="100" autocomplete="off">
       <div class="modal-foot">
         ${onDelete ? '<button type="button" class="btn danger" data-del>削除</button>' : ''}
         <button type="submit" class="btn primary">${tx ? (isPending ? '確定する' : '更新') : '記録する'}</button>
