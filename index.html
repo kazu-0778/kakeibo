@@ -14,31 +14,11 @@
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="stylesheet" href="style.css">
-  <script src="supabase.js"></script>
-  <script src="chart.umd.min.js"></script>
   <script type="module" src="app.js"></script>
 </head>
 <body>
   <!-- 起動中 -->
   <div id="splash" class="splash">読み込み中…</div>
-
-  <!-- ログイン -->
-  <div id="login" class="login" hidden>
-    <form id="login-form" class="login-card">
-      <div class="login-logo">💴</div>
-      <h1>家計簿</h1>
-      <label class="field">
-        <span>メールアドレス</span>
-        <input type="email" name="email" autocomplete="username" required>
-      </label>
-      <label class="field">
-        <span>パスワード</span>
-        <input type="password" name="password" autocomplete="current-password" required>
-      </label>
-      <p id="login-error" class="error" hidden></p>
-      <button type="submit" class="btn primary block">ログイン</button>
-    </form>
-  </div>
 
   <!-- 本体 -->
   <div id="app" class="app" hidden>
@@ -61,6 +41,7 @@
     <main class="main">
       <!-- 入力 -->
       <section id="view-input" class="view">
+        <div id="notice"></div>
         <button id="pending-banner" class="pending-banner" hidden></button>
         <div id="input-form" class="card"></div>
         <h2 class="section-title">最近の入力</h2>

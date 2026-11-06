@@ -1,4 +1,9 @@
 import { db } from './db.js';
+import { toCsv, fromCsv, saveFile } from './backup.js';
+
+// Supabase からの引き継ぎ機能（引き継ぎ完了後の版では false にしてファイルごと削除）
+const MIGRATION_ENABLED = true;
+const BACKUP_REMIND_DAYS = 90; // バックアップの声かけ間隔（約3か月）
 
 // =====================================================================
 // 定数・ユーティリティ
@@ -308,7 +313,7 @@ function bindTxRows(root, list) {
 // 確認待ち
 // =====================================================================
 async function loadPending() {
-  state.pending = await db.listPending(state.hh);
+  state.pending = await db.listPending();
   const b = $('#pending-banner');
   b.hidden = !state.pending.length;
   b.innerHTML = `🔔 <span>確認待ちの固定費が <b>${state.pending.length}件</b> あります</span><span class="arrow">›</span>`;
@@ -364,7 +369,7 @@ async function renderInput() {
   if (!inputMounted) {
     mountTxForm($('#input-form'), {
       onSubmit: async (v) => {
-        await db.saveTransaction({ ...v, household_id: state.hh });
+        await db.saveTransaction(v);
         toast(`${catOf(v.category_id).icon} ${yen(v.amount)} を記録しました`);
         await loadRecent();
         return true;
@@ -376,7 +381,7 @@ async function renderInput() {
   await loadRecent();
 }
 async function loadRecent() {
-  const list = await db.listRecent(state.hh, 8);
+  const list = await db.listRecent(8);
   const box = $('#recent-list');
   box.innerHTML = list.length ? list.map((t) => txRow(t, { showDate: true })).join('') : '<p class="empty">まだ記録がありません</p>';
   bindTxRows(box, list);
@@ -409,7 +414,7 @@ async function renderHistory() {
   renderMonthNavs();
   const from = ymd(state.month);
   const to = ymd(addMonths(state.month, 1));
-  const list = await db.listTransactions(state.hh, from, to);
+  const list = await db.listTransactions(from, to);
   const confirmed = list.filter((t) => t.status === 'confirmed');
   const inc = confirmed.filter(isIncome).reduce((a, t) => a + t.amount, 0);
   const exp = confirmed.filter((t) => !isIncome(t)).reduce((a, t) => a + t.amount, 0);
@@ -497,7 +502,7 @@ function openDaySheet(date) {
   const renderList = async () => {
     const box = $('[data-day-list]', body);
     if (!box) return;
-    const items = await db.listTransactions(state.hh, date, ymd(next));
+    const items = await db.listTransactions(date, ymd(next));
     const ok = items.filter((t) => t.status === 'confirmed');
     const exp = ok.filter((t) => !isIncome(t)).reduce((a, t) => a + t.amount, 0);
     const inc = ok.filter(isIncome).reduce((a, t) => a + t.amount, 0);
@@ -515,7 +520,7 @@ function openDaySheet(date) {
   mountTxForm($('[data-form]', body), {
     defaultDate: date,
     onSubmit: async (v) => {
-      await db.saveTransaction({ ...v, household_id: state.hh });
+      await db.saveTransaction(v);
       toast(`${catOf(v.category_id).icon} ${yen(v.amount)} を記録しました`);
       changed = true;
       await renderList();
@@ -549,8 +554,22 @@ $('#cat-filter').addEventListener('click', (e) => {
 
 let chartData = { range: [], trend: [], months: [] };
 
+// グラフの部品は、グラフ画面を開いたときに初めて読み込む（起動を軽くするため）
+let chartLib = null;
+function loadChartLib() {
+  chartLib ??= window.Chart ? Promise.resolve() : new Promise((resolve, reject) => {
+    const sc = document.createElement('script');
+    sc.src = 'chart.umd.min.js';
+    sc.onload = resolve;
+    sc.onerror = () => { chartLib = null; reject(new Error('グラフの部品を読み込めません')); };
+    document.head.append(sc);
+  });
+  return chartLib;
+}
+
 async function renderCharts() {
   renderMonthNavs();
+  await loadChartLib();
   const yearMode = state.period === 'year';
   const rangeFrom = yearMode ? new Date(state.month.getFullYear(), 0, 1) : state.month;
   const rangeTo = yearMode ? new Date(state.month.getFullYear() + 1, 0, 1) : addMonths(state.month, 1);
@@ -559,7 +578,7 @@ async function renderCharts() {
   const from = trendFrom < rangeFrom ? trendFrom : rangeFrom;
   const to = trendTo > rangeTo ? trendTo : rangeTo;
 
-  const all = (await db.listTransactions(state.hh, ymd(from), ymd(to))).filter((t) => t.status === 'confirmed');
+  const all = (await db.listTransactions(ymd(from), ymd(to))).filter((t) => t.status === 'confirmed');
   const inRange = (t, a, b) => t.date >= ymd(a) && t.date < ymd(b);
   chartData.range = all.filter((t) => inRange(t, rangeFrom, rangeTo));
   chartData.months = Array.from({ length: 12 }, (_, i) => addMonths(trendFrom, i));
@@ -703,7 +722,9 @@ function renderTrend() {
 // 画面：設定
 // =====================================================================
 async function renderSettings() {
-  const recurring = await db.listRecurring(state.hh);
+  const [recurring, txCount, lastBackup, migratedAt, persisted] = await Promise.all([
+    db.listRecurring(), db.countTransactions(), db.getMeta('last_backup_at'), db.getMeta('migrated_at'), db.isPersisted(),
+  ]);
   const kind = state.settingsKind;
   const cats = sortedCats(kind, { includeArchived: true });
 
@@ -746,17 +767,39 @@ async function renderSettings() {
     <p class="muted" style="font-size:12px;margin:8px 4px 0">行をタップすると、名前・アイコン・大分類の変更や削除ができます。右端の ≡ をドラッグすると並べ替えられます。</p>
     ${catGroups}
 
-    <div class="settings-head"><h2>アカウント</h2></div>
+    <div class="settings-head"><h2>データ・バックアップ</h2></div>
     <div class="card">
-      <label class="field"><span>世帯の名前</span>
-        <div style="display:flex;gap:8px"><input name="hhname" value="${esc(state.household?.name ?? '')}" maxlength="30">
-        <button type="button" class="btn" data-save-hh>保存</button></div></label>
-      <p class="muted" style="font-size:13px;margin:0 0 12px">ログイン中：${esc(state.user.email)}</p>
-      <button type="button" class="btn block" data-logout>ログアウト</button>
+      <p class="muted" style="font-size:13px;margin:0 0 10px">データはこのスマホの中だけに保存されています。機種変更や故障に備えて、ときどきバックアップしてください。</p>
+      <div class="kv"><span>記録の件数</span><b>${txCount.toLocaleString('ja-JP')}件</b></div>
+      <div class="kv"><span>前回のバックアップ</span><b>${lastBackup ? esc(fmtDateLong(ymd(new Date(lastBackup)))) : 'まだありません'}</b></div>
+      <div class="kv"><span>データの保護（自動削除の防止）</span><b>${persisted === true ? '有効' : persisted === false ? '未許可' : '不明'}</b></div>
+      <div class="btn-stack">
+        <button type="button" class="btn primary block" data-backup="share">バックアップを保存</button>
+        <button type="button" class="btn block" data-backup="download">この端末にダウンロード</button>
+        <button type="button" class="btn block" data-restore>バックアップから復元</button>
+        <input type="file" accept=".csv,text/csv,text/comma-separated-values" hidden data-restore-file>
+      </div>
+      <p class="muted" style="font-size:12px;margin:10px 0 0">「バックアップを保存」ではGoogleドライブなどの保存先を選べます。ファイルはCSV形式で、Excelでも開けます。</p>
+    </div>
+    ${MIGRATION_ENABLED ? `<div class="settings-head"><h2>以前のデータの引き継ぎ</h2></div>
+    <div class="card">
+      <p class="muted" style="font-size:13px;margin:0 0 10px">Supabase（以前の保存先）にあるデータを、このスマホに取り込みます。${migratedAt ? `<br>前回の引き継ぎ：${esc(fmtDateLong(ymd(new Date(migratedAt))))}` : ''}</p>
+      <button type="button" class="btn block" data-migrate>Supabaseから引き継ぐ</button>
+    </div>` : ''}
     </div>`;
 
   const root = $('#settings');
-  if (!root.dataset.dragReady) { enableCategoryDrag(root); root.dataset.dragReady = '1'; }
+  if (!root.dataset.dragReady) {
+    enableCategoryDrag(root);
+    root.addEventListener('change', (e) => {
+      if (e.target.matches('[data-restore-file]') && e.target.files[0]) {
+        const file = e.target.files[0];
+        e.target.value = '';
+        guard(() => restoreFrom(file));
+      }
+    });
+    root.dataset.dragReady = '1';
+  }
   const recMap = new Map(recurring.map((r) => [r.id, r]));
   root.onclick = async (e) => {
     const t = e.target;
@@ -769,15 +812,119 @@ async function renderSettings() {
     if (ce) return openCategoryEditor(state.catMap.get(ce.dataset.catEdit));
     const sk = t.closest('[data-skind]');
     if (sk) { state.settingsKind = sk.dataset.skind; return renderSettings(); }
-    if (t.closest('[data-save-hh]')) {
-      const name = $('[name="hhname"]', root).value.trim();
-      if (!name) return;
-      return guard(async () => { await db.renameHousehold(state.hh, name); state.household.name = name; toast('保存しました'); });
+    const bk = t.closest('[data-backup]');
+    if (bk) return guard(() => doBackup(bk.dataset.backup === 'share'));
+    if (t.closest('[data-restore]')) return $('[data-restore-file]', root).click();
+    if (t.closest('[data-migrate]')) return guard(runMigration);
+  };
+}
+
+// ---- バックアップ・復元 ----
+async function doBackup(share) {
+  const data = await db.exportAll();
+  const name = `kakeibo-backup-${todayStr().replace(/-/g, '')}.csv`;
+  const res = await saveFile(toCsv(data), name, { share });
+  if (res === 'cancelled') return;
+  await db.setMeta('last_backup_at', new Date().toISOString());
+  await db.setMeta('backup_snooze_until', null);
+  toast(res === 'shared' ? 'バックアップを保存しました' : `${name} をダウンロードしました`);
+  renderNotice();
+  if (state.view === 'settings') renderSettings();
+}
+
+async function restoreFrom(file) {
+  const data = fromCsv(await file.text());
+  const cur = await db.countTransactions();
+  if (!confirm(`バックアップの内容：\n・記録 ${data.transactions.length}件\n・カテゴリ ${data.categories.length}件\n・固定費 ${data.recurring.length}件\n\nこの内容で復元しますか？\n${cur ? `今このスマホにある記録 ${cur}件は、すべて置き換わります。` : ''}`)) return;
+  await db.replaceAll(data);
+  await afterDataReplaced();
+  toast(`復元しました（記録 ${data.transactions.length}件）`);
+}
+
+async function afterDataReplaced() {
+  setCategories(await db.listCategories());
+  await db.processRecurring();
+  await loadPending();
+  inputMounted = false;
+  renderNotice();
+  await renderView();
+}
+
+// ---- Supabase からの引き継ぎ（一時的な機能） ----
+async function runMigration() {
+  const m = await import('./migrate.js');
+  if (!(await m.isSignedIn())) {
+    const ok = await askSupabaseLogin(m);
+    if (!ok) return;
+  }
+  toast('以前のデータを読み込んでいます…');
+  const data = await m.fetchFromSupabase();
+  if (!data.categories.length) throw new Error('以前のデータにカテゴリがありません');
+  const cur = await db.countTransactions();
+  if (!confirm(`以前のデータ（Supabase）：\n・記録 ${data.transactions.length}件\n・カテゴリ ${data.categories.length}件\n・固定費 ${data.recurring.length}件\n\nこのスマホに取り込みますか？\n${cur ? `今このスマホにある記録 ${cur}件は、すべて置き換わります。` : ''}`)) return;
+  await db.replaceAll(data);
+  await db.setMeta('migrated_at', new Date().toISOString());
+  await afterDataReplaced();
+  toast(`引き継ぎました（記録 ${data.transactions.length}件）`);
+}
+
+function askSupabaseLogin(m) {
+  return new Promise((resolve) => {
+    const body = openModal('以前のアカウントでログイン', `
+      <form novalidate>
+        <p class="muted" style="font-size:13px;margin:0 0 12px">引き継ぎのため、以前使っていたメールアドレスとパスワードを入力してください。</p>
+        <label class="field"><span>メールアドレス</span><input type="email" name="email" autocomplete="username" required></label>
+        <label class="field"><span>パスワード</span><input type="password" name="password" autocomplete="current-password" required></label>
+        <div class="modal-foot"><button type="submit" class="btn primary">ログインして引き継ぐ</button></div>
+      </form>`);
+    let done = false;
+    modal.addEventListener('close', () => { if (!done) resolve(false); }, { once: true });
+    $('form', body).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = e.target;
+      const btn = $('button[type=submit]', f);
+      btn.disabled = true;
+      try {
+        await m.signIn(f.email.value.trim(), f.password.value);
+        done = true;
+        closeModal();
+        resolve(true);
+      } catch (ex) {
+        toast(errMsg(ex), true);
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+// ---- 入力画面上部のお知らせ（引き継ぎ・バックアップの声かけ） ----
+async function renderNotice() {
+  const box = $('#notice');
+  if (!box) return;
+  const [migratedAt, lastBackup, installedAt, snooze, count] = await Promise.all([
+    db.getMeta('migrated_at'), db.getMeta('last_backup_at'), db.getMeta('installed_at'),
+    db.getMeta('backup_snooze_until'), db.countTransactions(),
+  ]);
+  const now = Date.now();
+  let html = '';
+  if (MIGRATION_ENABLED && !migratedAt) {
+    html = `<div class="notice"><span>📦 以前のデータ（Supabase）をこのスマホに引き継げます</span>
+      <div class="notice-actions"><button type="button" class="btn small primary" data-n-migrate>引き継ぐ</button></div></div>`;
+  } else {
+    const base = new Date(lastBackup ?? installedAt ?? now).getTime();
+    const due = count > 0 && now - base > BACKUP_REMIND_DAYS * 86400000 && !(snooze && now < new Date(snooze).getTime());
+    if (due) {
+      html = `<div class="notice"><span>💾 ${lastBackup ? '前回のバックアップから3か月たちました' : 'まだバックアップしていません'}。データを守るため、バックアップしませんか？</span>
+        <div class="notice-actions"><button type="button" class="btn small" data-n-snooze>あとで</button>
+        <button type="button" class="btn small primary" data-n-backup>今すぐ保存</button></div></div>`;
     }
-    if (t.closest('[data-logout]')) {
-      if (!confirm('ログアウトしますか？')) return;
-      await db.signOut();
-      location.reload();
+  }
+  box.innerHTML = html;
+  box.onclick = (e) => {
+    if (e.target.closest('[data-n-migrate]')) guard(runMigration);
+    else if (e.target.closest('[data-n-backup]')) guard(() => doBackup(true));
+    else if (e.target.closest('[data-n-snooze]')) {
+      guard(async () => { await db.setMeta('backup_snooze_until', new Date(now + 7 * 86400000).toISOString()); renderNotice(); });
     }
   };
 }
@@ -923,7 +1070,7 @@ function openCategoryEditor(cat, defaultKind = 'expense', { major, onSaved } = {
         } else {
           toast('削除しました');
         }
-        setCategories(await db.listCategories(state.hh));
+        setCategories(await db.listCategories());
         closeModal(); inputMounted = false; renderView();
       });
     }
@@ -945,14 +1092,13 @@ function openCategoryEditor(cat, defaultKind = 'expense', { major, onSaved } = {
         row.sort_order = (s.kind === 'income' ? 300 : { consumption: 0, waste: 100, investment: 200 }[s.major]) + 99;
       }
     } else {
-      row.household_id = state.hh;
       const group = sortedCats(s.kind, { includeArchived: true }).filter((c) => c.major === row.major);
       row.sort_order = group.length ? Math.max(...group.map((c) => c.sort_order)) + 5
         : (s.kind === 'income' ? 300 : { consumption: 0, waste: 100, investment: 200 }[s.major]) + 5;
     }
     await guard(async () => {
       const saved = await db.saveCategory(row);
-      setCategories(await db.listCategories(state.hh));
+      setCategories(await db.listCategories());
       closeModal();
       if (onSaved) { toast(`${row.icon} ${row.name} を追加しました`); onSaved(saved); return; }
       toast('保存しました'); inputMounted = false; renderView();
@@ -1063,10 +1209,10 @@ function openRecurringEditor(rec) {
       day_of_month: Number(form.day.value),
       next_date: ymd(nextDate()),
     };
-    if (rec) { row.id = rec.id; row.active = form.active.checked; } else { row.household_id = state.hh; }
+    if (rec) { row.id = rec.id; row.active = form.active.checked; }
     await guard(async () => {
       await db.saveRecurring(row);
-      const n = await db.processRecurring(state.hh);
+      const n = await db.processRecurring();
       closeModal();
       toast(n ? `保存しました（${n}件を記録）` : '保存しました');
       await loadPending();
@@ -1106,11 +1252,11 @@ async function refreshAfterChange(rerender = true) {
 // 画面に戻ってきたとき（スマホでアプリを再表示したとき）に最新化
 let lastSync = Date.now();
 document.addEventListener('visibilitychange', async () => {
-  if (document.visibilityState !== 'visible' || !state.hh || Date.now() - lastSync < 30000) return;
+  if (document.visibilityState !== 'visible' || !state.ready || Date.now() - lastSync < 30000) return;
   lastSync = Date.now();
   await guard(async () => {
-    setCategories(await db.listCategories(state.hh));
-    const n = await db.processRecurring(state.hh);
+    setCategories(await db.listCategories());
+    const n = await db.processRecurring();
     if (n) toast(`固定費を${n}件記録しました`);
     await loadPending();
     if (modal.open) return;
@@ -1124,39 +1270,18 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if
 // =====================================================================
 // 起動
 // =====================================================================
-async function startApp(user) {
-  state.user = user;
-  state.hh = await db.ensureHousehold();
-  const [household, categories] = await Promise.all([db.getHousehold(state.hh), db.listCategories(state.hh)]);
-  state.household = household;
-  setCategories(categories);
-  const n = await guard(() => db.processRecurring(state.hh));
+async function startApp() {
+  await db.init();
+  setCategories(await db.listCategories());
+  const n = await guard(() => db.processRecurring());
   await loadPending();
+  state.ready = true;
   $('#splash').hidden = true;
-  $('#login').hidden = true;
   $('#app').hidden = false;
   await renderView();
   if (n) toast(`固定費を${n}件記録しました`);
-}
-
-function showLogin() {
-  $('#splash').hidden = true;
-  $('#login').hidden = false;
-  const form = $('#login-form');
-  form.onsubmit = async (e) => {
-    e.preventDefault();
-    const btn = $('button', form);
-    const err = $('#login-error');
-    btn.disabled = true; err.hidden = true;
-    try {
-      await db.signIn(form.email.value.trim(), form.password.value);
-      await startApp(await db.getUser());
-    } catch (ex) {
-      err.textContent = errMsg(ex); err.hidden = false;
-    } finally {
-      btn.disabled = false;
-    }
-  };
+  renderNotice();
+  db.persist().catch(() => {});
 }
 
 async function boot() {
@@ -1164,8 +1289,7 @@ async function boot() {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   try {
-    const user = await db.getUser();
-    if (user) await startApp(user); else showLogin();
+    await startApp();
   } catch (e) {
     console.error(e);
     $('#splash').textContent = errMsg(e);

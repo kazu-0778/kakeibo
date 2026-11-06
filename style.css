@@ -401,3 +401,12 @@ body.is-dragging { user-select: none; -webkit-user-select: none; cursor: grabbin
 @media (min-width: 900px) { .cal-day .e, .cal-day .i, .cal-day .l, .cal-day .xl { font-size: 12px; } }
 .day-total b { color: var(--minus); }
 .day-total b.inc { color: var(--plus); }
+/* ---------- お知らせ・データ設定 ---------- */
+.notice {
+  display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; padding: 12px 14px;
+  border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius); font-size: 14px; font-weight: 600;
+}
+.notice-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.kv { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; padding: 8px 0; border-top: 1px solid var(--border); }
+.kv span { color: var(--text-2); }
+.btn-stack { display: grid; gap: 8px; margin-top: 12px; }
