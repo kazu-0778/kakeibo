@@ -16,7 +16,6 @@
 | chart.umd.min.js | グラフ用ライブラリ（グラフ画面を開いたときだけ読み込む） |
 | sw.js | オフライン対応・高速起動 |
 | manifest.webmanifest, icon-*.png | ホーム画面に追加するための設定・アイコン |
-| migrate.js, supabase.js, config.js, schema.sql | 【一時的】以前の保存先（Supabase）からの引き継ぎ用。引き継ぎ完了後に削除 |
 
 ## 使い方のポイント
 

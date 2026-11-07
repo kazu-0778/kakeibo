@@ -1,8 +1,6 @@
 import { db } from './db.js';
 import { toCsv, fromCsv, saveFile } from './backup.js';
 
-// Supabase からの引き継ぎ機能（引き継ぎ完了後の版では false にしてファイルごと削除）
-const MIGRATION_ENABLED = true;
 const BACKUP_REMIND_DAYS = 90; // バックアップの声かけ間隔（約3か月）
 
 // =====================================================================
@@ -97,8 +95,6 @@ function toast(msg, isError = false) {
 function errMsg(e) {
   const m = e?.message ?? String(e);
   if (/fetch|network|load failed/i.test(m)) return 'ネットワークに接続できません';
-  if (/invalid login/i.test(m)) return 'メールアドレスかパスワードが違います';
-  if (/email not confirmed/i.test(m)) return 'メールアドレスが未確認です';
   return 'エラー：' + m;
 }
 async function guard(fn) {
@@ -722,8 +718,8 @@ function renderTrend() {
 // 画面：設定
 // =====================================================================
 async function renderSettings() {
-  const [recurring, txCount, lastBackup, migratedAt, persisted] = await Promise.all([
-    db.listRecurring(), db.countTransactions(), db.getMeta('last_backup_at'), db.getMeta('migrated_at'), db.isPersisted(),
+  const [recurring, txCount, lastBackup, persisted] = await Promise.all([
+    db.listRecurring(), db.countTransactions(), db.getMeta('last_backup_at'), db.isPersisted(),
   ]);
   const kind = state.settingsKind;
   const cats = sortedCats(kind, { includeArchived: true });
@@ -780,12 +776,6 @@ async function renderSettings() {
         <input type="file" accept=".csv,text/csv,text/comma-separated-values" hidden data-restore-file>
       </div>
       <p class="muted" style="font-size:12px;margin:10px 0 0">「バックアップを保存」ではGoogleドライブなどの保存先を選べます。ファイルはCSV形式で、Excelでも開けます。</p>
-    </div>
-    ${MIGRATION_ENABLED ? `<div class="settings-head"><h2>以前のデータの引き継ぎ</h2></div>
-    <div class="card">
-      <p class="muted" style="font-size:13px;margin:0 0 10px">Supabase（以前の保存先）にあるデータを、このスマホに取り込みます。${migratedAt ? `<br>前回の引き継ぎ：${esc(fmtDateLong(ymd(new Date(migratedAt))))}` : ''}</p>
-      <button type="button" class="btn block" data-migrate>Supabaseから引き継ぐ</button>
-    </div>` : ''}
     </div>`;
 
   const root = $('#settings');
@@ -815,7 +805,6 @@ async function renderSettings() {
     const bk = t.closest('[data-backup]');
     if (bk) return guard(() => doBackup(bk.dataset.backup === 'share'));
     if (t.closest('[data-restore]')) return $('[data-restore-file]', root).click();
-    if (t.closest('[data-migrate]')) return guard(runMigration);
   };
 }
 
@@ -850,79 +839,25 @@ async function afterDataReplaced() {
   await renderView();
 }
 
-// ---- Supabase からの引き継ぎ（一時的な機能） ----
-async function runMigration() {
-  const m = await import('./migrate.js');
-  if (!(await m.isSignedIn())) {
-    const ok = await askSupabaseLogin(m);
-    if (!ok) return;
-  }
-  toast('以前のデータを読み込んでいます…');
-  const data = await m.fetchFromSupabase();
-  if (!data.categories.length) throw new Error('以前のデータにカテゴリがありません');
-  const cur = await db.countTransactions();
-  if (!confirm(`以前のデータ（Supabase）：\n・記録 ${data.transactions.length}件\n・カテゴリ ${data.categories.length}件\n・固定費 ${data.recurring.length}件\n\nこのスマホに取り込みますか？\n${cur ? `今このスマホにある記録 ${cur}件は、すべて置き換わります。` : ''}`)) return;
-  await db.replaceAll(data);
-  await db.setMeta('migrated_at', new Date().toISOString());
-  await afterDataReplaced();
-  toast(`引き継ぎました（記録 ${data.transactions.length}件）`);
-}
-
-function askSupabaseLogin(m) {
-  return new Promise((resolve) => {
-    const body = openModal('以前のアカウントでログイン', `
-      <form novalidate>
-        <p class="muted" style="font-size:13px;margin:0 0 12px">引き継ぎのため、以前使っていたメールアドレスとパスワードを入力してください。</p>
-        <label class="field"><span>メールアドレス</span><input type="email" name="email" autocomplete="username" required></label>
-        <label class="field"><span>パスワード</span><input type="password" name="password" autocomplete="current-password" required></label>
-        <div class="modal-foot"><button type="submit" class="btn primary">ログインして引き継ぐ</button></div>
-      </form>`);
-    let done = false;
-    modal.addEventListener('close', () => { if (!done) resolve(false); }, { once: true });
-    $('form', body).addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const f = e.target;
-      const btn = $('button[type=submit]', f);
-      btn.disabled = true;
-      try {
-        await m.signIn(f.email.value.trim(), f.password.value);
-        done = true;
-        closeModal();
-        resolve(true);
-      } catch (ex) {
-        toast(errMsg(ex), true);
-        btn.disabled = false;
-      }
-    });
-  });
-}
-
-// ---- 入力画面上部のお知らせ（引き継ぎ・バックアップの声かけ） ----
+// ---- 入力画面上部のお知らせ（バックアップの声かけ） ----
 async function renderNotice() {
   const box = $('#notice');
   if (!box) return;
-  const [migratedAt, lastBackup, installedAt, snooze, count] = await Promise.all([
-    db.getMeta('migrated_at'), db.getMeta('last_backup_at'), db.getMeta('installed_at'),
+  const [lastBackup, installedAt, snooze, count] = await Promise.all([
+    db.getMeta('last_backup_at'), db.getMeta('installed_at'),
     db.getMeta('backup_snooze_until'), db.countTransactions(),
   ]);
   const now = Date.now();
-  let html = '';
-  if (MIGRATION_ENABLED && !migratedAt) {
-    html = `<div class="notice"><span>📦 以前のデータ（Supabase）をこのスマホに引き継げます</span>
-      <div class="notice-actions"><button type="button" class="btn small primary" data-n-migrate>引き継ぐ</button></div></div>`;
-  } else {
-    const base = new Date(lastBackup ?? installedAt ?? now).getTime();
-    const due = count > 0 && now - base > BACKUP_REMIND_DAYS * 86400000 && !(snooze && now < new Date(snooze).getTime());
-    if (due) {
-      html = `<div class="notice"><span>💾 ${lastBackup ? '前回のバックアップから3か月たちました' : 'まだバックアップしていません'}。データを守るため、バックアップしませんか？</span>
-        <div class="notice-actions"><button type="button" class="btn small" data-n-snooze>あとで</button>
-        <button type="button" class="btn small primary" data-n-backup>今すぐ保存</button></div></div>`;
-    }
-  }
+  const base = new Date(lastBackup ?? installedAt ?? now).getTime();
+  const due = count > 0 && now - base > BACKUP_REMIND_DAYS * 86400000 && !(snooze && now < new Date(snooze).getTime());
+  const html = due
+    ? `<div class="notice"><span>💾 ${lastBackup ? '前回のバックアップから3か月たちました' : 'まだバックアップしていません'}。データを守るため、バックアップしませんか？</span>
+      <div class="notice-actions"><button type="button" class="btn small" data-n-snooze>あとで</button>
+      <button type="button" class="btn small primary" data-n-backup>今すぐ保存</button></div></div>`
+    : '';
   box.innerHTML = html;
   box.onclick = (e) => {
-    if (e.target.closest('[data-n-migrate]')) guard(runMigration);
-    else if (e.target.closest('[data-n-backup]')) guard(() => doBackup(true));
+    if (e.target.closest('[data-n-backup]')) guard(() => doBackup(true));
     else if (e.target.closest('[data-n-snooze]')) {
       guard(async () => { await db.setMeta('backup_snooze_until', new Date(now + 7 * 86400000).toISOString()); renderNotice(); });
     }

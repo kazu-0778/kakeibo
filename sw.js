@@ -1,6 +1,6 @@
 // アプリの画面をスマホ内に保存し、通信なしで一瞬で開けるようにするサービスワーカー
 // 更新時は VERSION を変更してください（変更すると、次回起動時に新しい版へ切り替わります）
-const VERSION = 'kakeibo-v11';
+const VERSION = 'kakeibo-v12';
 const ASSETS = [
   './', 'index.html', 'style.css', 'app.js', 'db.js', 'backup.js',
   'chart.umd.min.js', 'manifest.webmanifest', 'icon-192.png', 'apple-touch-icon.png',
