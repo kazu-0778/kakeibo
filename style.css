@@ -410,3 +410,17 @@ body.is-dragging { user-select: none; -webkit-user-select: none; cursor: grabbin
 .kv { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; padding: 8px 0; border-top: 1px solid var(--border); }
 .kv span { color: var(--text-2); }
 .btn-stack { display: grid; gap: 8px; margin-top: 12px; }
+/* ---------- 折りたたみ（設定の固定費欄） ---------- */
+.fold { padding: 0; margin-top: 16px; overflow: hidden; }
+.fold-head {
+  width: 100%; display: flex; align-items: center; gap: 12px; border: none; background: none;
+  padding: 14px 16px; min-height: 60px; text-align: left;
+}
+.fold-head:hover { background: var(--surface-2); }
+.fold-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.fold-title { font-size: 15px; font-weight: 700; }
+.fold-sub { font-size: 12px; color: var(--text-3); }
+.fold-head .chev { font-size: 22px; color: var(--text-3); transition: transform .2s; }
+.fold-head[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.fold-body { border-top: 1px solid var(--border); }
+.fold-foot { padding: 12px 16px 14px; border-top: 1px solid var(--border); }

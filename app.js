@@ -66,6 +66,7 @@ const state = {
   period: 'month',
   catFilter: '',
   settingsKind: 'expense',
+  recOpen: false, // 設定画面の固定費欄（普段は折りたたむ）
 };
 
 const catOf = (id) => state.catMap.get(id) ?? { name: '不明', icon: '❔', kind: 'expense', major: 'consumption' };
@@ -752,8 +753,17 @@ async function renderSettings() {
 
   $('#settings').innerHTML = `
     ${state.pending.length ? `<button type="button" class="pending-banner" data-open-pending>🔔 <span>確認待ちが <b>${state.pending.length}件</b> あります</span><span class="arrow">›</span></button>` : ''}
-    <div class="settings-head"><h2>固定費・定期収入</h2><button type="button" class="btn small" data-add-rec>＋ 追加</button></div>
-    <div class="card list">${recurring.map(recRow).join('') || '<p class="empty">家賃・サブスク・給与など、毎回決まった支払いや入金を登録できます</p>'}</div>
+    <div class="card fold">
+      <button type="button" class="fold-head" data-toggle-rec aria-expanded="${state.recOpen}">
+        <span class="fold-text"><span class="fold-title">固定費・定期収入</span>
+          <span class="fold-sub">${recurring.length ? `${recurring.filter((r) => r.active).length}件登録中${recurring.some((r) => !r.active) ? `（停止中 ${recurring.filter((r) => !r.active).length}件）` : ''}` : '未登録'}</span></span>
+        <span class="chev" aria-hidden="true">›</span>
+      </button>
+      ${state.recOpen ? `<div class="fold-body">
+        <div class="list">${recurring.map(recRow).join('') || '<p class="empty">家賃・サブスク・給与など、毎回決まった支払いや入金を登録できます</p>'}</div>
+        <div class="fold-foot"><button type="button" class="btn block" data-add-rec>＋ 固定費・定期収入を追加</button></div>
+      </div>` : ''}
+    </div>
 
     <div class="settings-head"><h2>カテゴリ</h2><button type="button" class="btn small" data-add-cat>＋ 追加</button></div>
     <div class="segmented block" style="margin-bottom:4px">
@@ -794,6 +804,7 @@ async function renderSettings() {
   root.onclick = async (e) => {
     const t = e.target;
     if (t.closest('[data-open-pending]')) return openPendingModal();
+    if (t.closest('[data-toggle-rec]')) { state.recOpen = !state.recOpen; return renderSettings(); }
     if (t.closest('[data-add-rec]')) return openRecurringEditor(null);
     const rec = t.closest('[data-rec]');
     if (rec) return openRecurringEditor(recMap.get(rec.dataset.rec));
